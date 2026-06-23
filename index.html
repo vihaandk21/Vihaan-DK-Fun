@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Air Drawing App - Neon Glow</title>
     
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
 
     <style>
         body {
@@ -228,7 +228,7 @@
     <div id="app-container">
         <div id="loading">
             <div id="loading-text">Initializing Camera & AI Tracking...</div>
-            <small style="color: #aaa; font-size: 0.8rem;">Please grant camera permissions when prompted.</small>
+            <small style="color: #aaa; font-size: 0.8rem; margin-top: 5px;">Please allow camera permissions when prompted.</small>
         </div>
         
         <div id="instructions-overlay">
@@ -267,7 +267,7 @@
         let lastX = null;
         let lastY = null;
 
-        // Persistent scratchpad context for tracking drawings safely
+        // Persistent offscreen backup context 
         const drawingCanvas = document.createElement('canvas');
         const drawCtx = drawingCanvas.getContext('2d');
 
@@ -283,136 +283,3 @@
 
         function getDistance(pt1, pt2) {
             return Math.sqrt(Math.pow(pt1.x - pt2.x, 2) + Math.pow(pt1.y - pt2.y, 2));
-        }
-
-        function onResults(results) {
-            // Dismiss loading screen when the first processed framework frame responds
-            if (loadingScreen && loadingScreen.style.opacity !== '0') {
-                loadingScreen.style.opacity = '0';
-                setTimeout(() => loadingScreen.style.display = 'none', 500);
-            }
-
-            ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-            ctx.drawImage(drawingCanvas, 0, 0);
-
-            if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
-                statusIndicator.innerText = "NO HAND";
-                statusIndicator.className = "status-pause";
-                lastX = null;
-                lastY = null;
-                return;
-            }
-
-            const landmarks = results.multiHandLandmarks[0];
-            const wrist = landmarks[0];
-            const indexTip = landmarks[8];
-            const indexPip = landmarks[6];
-            const middleTip = landmarks[12];
-            const ringTip = landmarks[16];
-            const pinkyTip = landmarks[20];
-
-            const currentX = indexTip.x * canvasElement.width;
-            const currentY = indexTip.y * canvasElement.height;
-
-            const isIndexUp = indexTip.y < indexPip.y;
-            const distMiddle = getDistance(middleTip, wrist);
-            const distRing = getDistance(ringTip, wrist);
-            const distPinky = getDistance(pinkyTip, wrist);
-            const distIndex = getDistance(indexTip, wrist);
-            
-            const handScale = getDistance(landmarks[5], wrist); 
-            const openThreshold = handScale * 1.2; 
-            const closeThreshold = handScale * 0.7;
-
-            let mode = "PAUSE";
-
-            if (distIndex > openThreshold && distMiddle > openThreshold && distRing > openThreshold && distPinky > openThreshold) {
-                mode = "ERASE";
-            } else if (isIndexUp && distMiddle < openThreshold && distRing < openThreshold) {
-                mode = "DRAW";
-            } else if (distIndex < closeThreshold && distMiddle < closeThreshold && distRing < closeThreshold) {
-                mode = "PAUSE";
-            }
-            
-            statusIndicator.innerText = mode;
-            statusIndicator.className = `status-${mode.toLowerCase()}`;
-
-            if (mode === "DRAW") {
-                if (lastX !== null && lastY !== null) {
-                    drawCtx.beginPath();
-                    drawCtx.moveTo(lastX, lastY);
-                    drawCtx.lineTo(currentX, currentY);
-                    
-                    const brushColor = colorPicker.value;
-                    const brushSize = parseInt(brushSizeSlider.value);
-                    
-                    drawCtx.strokeStyle = brushColor;
-                    drawCtx.lineWidth = brushSize;
-                    drawCtx.shadowColor = brushColor;
-                    drawCtx.shadowBlur = brushSize * 1.5;
-                    
-                    drawCtx.stroke();
-                }
-                lastX = currentX;
-                lastY = currentY;
-            } else if (mode === "ERASE") {
-                const eraseSize = parseInt(brushSizeSlider.value) * 3;
-                drawCtx.clearRect(currentX - eraseSize/2, currentY - eraseSize/2, eraseSize, eraseSize);
-                lastX = null;
-                lastY = null;
-            } else {
-                lastX = null;
-                lastY = null;
-            }
-
-            // Draw Skeleton
-            ctx.save();
-            ctx.shadowBlur = 0; 
-            if (window.drawConnectors && window.HAND_CONNECTIONS) {
-                drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {
-                    color: 'rgba(255, 255, 255, 0.5)',
-                    lineWidth: 3
-                });
-            }
-            if (window.drawLandmarks) {
-                drawLandmarks(ctx, landmarks, {
-                    color: mode === "DRAW" ? '#00ffcc' : (mode === "ERASE" ? '#ff0055' : '#ffcc00'),
-                    lineWidth: 1,
-                    radius: 4
-                });
-            }
-            ctx.restore();
-        }
-
-        // Setup MediaPipe Hands with explicitly mapped sub-version folders
-        const hands = new Hands({
-            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/${file}`
-        });
-
-        hands.setOptions({
-            maxNumHands: 1,
-            modelComplexity: 1,
-            minDetectionConfidence: 0.7,
-            minTrackingConfidence: 0.7
-        });
-
-        hands.onResults(onResults);
-
-        // Fail-safe wrapper setup for the MediaPipe active camera asset instance
-        const camera = new Camera(videoElement, {
-            onFrame: async () => {
-                await hands.send({ image: videoElement });
-            },
-            width: 800,
-            height: 600
-        });
-        
-        camera.start().catch(err => {
-            console.error("Camera failed to load:", err);
-            if(loadingText) {
-                loadingText.innerHTML = "❌ Camera Access Denied or Missing.<br><span style='font-size:0.9rem; color:#ff4444;'>Please allow browser camera permissions and refresh.</span>";
-            }
-        });
-    </script>
-</body>
-</html>
