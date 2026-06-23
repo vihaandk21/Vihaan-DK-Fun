@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Air Drawing App - Neon Glow</title>
+    
+    <!-- Load MediaPipe Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #121212;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        #app-container {
+            position: relative;
+            width: 800px;
+            height: 600px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            border-radius: 12px;
+            overflow: hidden;
+            background: #000;
+        }
+
+        /* Video feed mirrored and hidden behind drawing canvas */
+        #webcam {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            transform: scaleX(-1); /* Mirror feed */
+            object-fit: cover;
+            opacity: 0.25; /* Faintly visible to guide you */
+            z-index: 1;
+        }
+
+        /* Drawing canvas overlaid on top */
+        #paintCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            transform: scaleX(-1); /* Mirror canvas to match video */
+            z-index: 2;
+            background: transparent;
+        }
+
+        /* UI Toolbar */
+        #toolbar {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            background: rgba(30, 30, 30, 0.85);
+            backdrop-filter: blur(10px);
+            padding: 12px 25px;
+            border-radius: 30px;
+            margin-bottom: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            z-index: 10;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        label {
+            font-size: 14px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        input[type="color"] {
+            border: none;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            cursor: pointer;
+            background: none;
+        }
+
+        input[type="range"] {
+            cursor: pointer;
+            accent-color: #00ffcc;
+        }
+
+        #status-indicator {
+            font-weight: bold;
+            padding: 5px 12px;
+            border-radius: 15px;
+            background: #444;
+            transition: all 0.3s ease;
+        }
+
+        .status-draw { color: #00ffcc; text-shadow: 0 0 8px #00ffcc; }
+        .status-erase { color: #ff0055; text-shadow: 0 0 8px #ff0055; }
+        .status-pause { color: #ffcc00; text-shadow: 0 0 8px #ffcc00; }
+        
+        #loading {
+            position: absolute;
+            color: #fff;
+            font-size: 1.5rem;
+            z-index: 100;
+            background: rgba(0,0,0,0.8);
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 0.5s ease;
+        }
+
+        /* Made by Vihaan DK Watermark/Credit styling */
+        #credit-badge {
+            position: absolute;
+            bottom: 15px;
+            right: 15px;
+            z-index: 20;
+            background: rgba(20, 20, 20, 0.75);
+            backdrop-filter: blur(5px);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: rgba(255, 255, 255, 0.9);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            pointer-events: none; /* Prevents it from getting in the way of gestures near edges */
+        }
+
+        #credit-badge span {
+            color: #00ffcc;
+            font-weight: bold;
+            text-shadow: 0 0 5px rgba(0, 255, 204, 0.5);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="toolbar">
+        <div class="control-group">
+            <label for="colorPicker">Color:</label>
+            <input type="color" id="colorPicker" value="#00ffcc">
+        </div>
+        
+        <div class="control-group">
+            <label for="brushSize">Size:</label>
+            <input type="range" id="brushSize" min="5" max="40" value="15">
+        </div>
+
+        <div class="control-group">
+            <label>Mode:</label>
+            <span id="status-indicator" class="status-pause">LOADING...</span>
+        </div>
+    </div>
+
+    <div id="app-container">
+        <div id="loading">Initializing Camera & AI Tracking...</div>
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="paintCanvas"></canvas>
+        
+        <!-- Attribution Badge -->
+        <div id="credit-badge">Made by <span>Vihaan DK</span></div>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('paintCanvas');
+        const ctx = canvasElement.getContext('2d');
+        const statusIndicator = document.getElementById('status-indicator');
+        const loadingScreen = document.getElementById('loading');
+        
+        // Controls
+        const colorPicker = document.getElementById('colorPicker');
+        const brushSizeSlider = document.getElementById('brushSize');
+
+        // Track last known position for drawing lines
+        let lastX = null;
+        let lastY = null;
+
+        // Set explicit canvas internal dimensions
+        function resizeCanvas() {
+            canvasElement.width = 800;
+            canvasElement.height = 600;
+            // Setup glowing properties once
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+        }
+        resizeCanvas();
+
+        // Helper: Calculate distance between two landmarks
+        function getDistance(pt1, pt2) {
+            return Math.sqrt(Math.pow(pt1.x - pt2.x, 2) + Math.pow(pt1.y - pt2.y, 2));
+        }
+
+        function onResults(results) {
+            // Hide loading screen on first frame received
+            if (loadingScreen.style.opacity !== '0') {
+                loadingScreen.style.opacity = '0';
+                setTimeout(() => loadingScreen.style.display = 'none', 500);
+            }
+
+            // Default state if no hand is detected
+            if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+                statusIndicator.innerText = "NO HAND";
+                statusIndicator.className = "status-pause";
+                lastX = null;
+                lastY = null;
+                return;
+            }
+
+            const landmarks = results.multiHandLandmarks[0];
+
+            // Extract useful tracking landmarks
+            const wrist = landmarks[0];
+            const indexTip = landmarks[8];
+            const indexPip = landmarks[6];
+            const middleTip = landmarks[12];
+            const ringTip = landmarks[16];
+            const pinkyTip = landmarks[20];
+
+            // Convert normalized coordinates (0.0 - 1.0) to canvas pixel coordinates
+            const currentX = indexTip.x * canvasElement.width;
+            const currentY = indexTip.y * canvasElement.height;
+
+            // --- GESTURE DETECTION LOGIC ---
+            
+            // 1. Is index finger up?
+            const isIndexUp = indexTip.y < indexPip.y;
+            
+            // 2. Are other fingers up?
+            const distMiddle = getDistance(middleTip, wrist);
+            const distRing = getDistance(ringTip, wrist);
+            const distPinky = getDistance(pinkyTip, wrist);
+            const distIndex = getDistance(indexTip, wrist);
+            
+            // Baseline dynamic threshold based on hand scale
+            const handScale = getDistance(landmarks[5], wrist); 
+            const openThreshold = handScale * 1.2; 
+            const closeThreshold = handScale * 0.7;
+
+            let mode = "PAUSE";
+
+            if (distIndex > openThreshold && distMiddle > openThreshold && distRing > openThreshold && distPinky > openThreshold) {
+                mode = "ERASE";
+            } else if (isIndexUp && distMiddle < openThreshold && distRing < openThreshold) {
+                mode = "DRAW";
+            } else if (distIndex < closeThreshold && distMiddle < closeThreshold && distRing < closeThreshold) {
+                mode = "PAUSE";
+            }
+
+            // --- ACTION EXECUTION ---
+            
+            // Update Status UI
+            statusIndicator.innerText = mode;
+            statusIndicator.className = `status-${mode.toLowerCase()}`;
+
+            if (mode === "DRAW") {
+                if (lastX !== null && lastY !== null) {
+                    ctx.beginPath();
+                    ctx.moveTo(lastX, lastY);
+                    ctx.lineTo(currentX, currentY);
+                    
+                    // Setup Neon Glow Style
+                    const brushColor = colorPicker.value;
+                    const brushSize = parseInt(brushSizeSlider.value);
+                    
+                    ctx.strokeStyle = brushColor;
+                    ctx.lineWidth = brushSize;
+                    ctx.shadowColor = brushColor;
+                    ctx.shadowBlur = brushSize * 1.5; // Neon bloom effect
+                    
+                    ctx.stroke();
+                }
+                // Save current location as last position
+                lastX = currentX;
+                lastY = currentY;
+
+            } else if (mode === "ERASE") {
+                // Erase via clear Rect in a radius around the index tip
+                const eraseSize = parseInt(brushSizeSlider.value) * 3; // Eraser is slightly larger
+                ctx.clearRect(currentX - eraseSize/2, currentY - eraseSize/2, eraseSize, eraseSize);
+                
+                // Reset coordinate memory so lines don't snap when you return to drawing
+                lastX = null;
+                lastY = null;
+            } else {
+                // PAUSE or unhandled gesture: sever continuous line path
+                lastX = null;
+                lastY = null;
+            }
+        }
+
+        // Initialize MediaPipe Hands
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+        });
+
+        hands.onResults(onResults);
+
+        // Active webcam stream via MediaPipe CameraUtils
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({ image: videoElement });
+            },
+            width: 800,
+            height: 600
+        });
+        
+        camera.start();
+    </script>
+</body>
+</html>
