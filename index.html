@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Air Drawing App - Neon Glow</title>
     
-    <!-- Load MediaPipe Libraries -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 
@@ -126,6 +125,61 @@
             transition: opacity 0.5s ease;
         }
 
+        /* Instructions HUD Overlay */
+        #instructions-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 5;
+            background: rgba(15, 15, 15, 0.75);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(0, 255, 204, 0.2);
+            padding: 15px 20px;
+            border-radius: 10px;
+            max-width: 280px;
+            pointer-events: none;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            transition: opacity 0.6s ease, transform 0.6s ease;
+        }
+
+        #instructions-overlay h3 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            letter-spacing: 1.5px;
+            color: #00ffcc;
+            text-shadow: 0 0 5px rgba(0, 255, 204, 0.4);
+            text-transform: uppercase;
+        }
+
+        .instruction-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 13px;
+            color: #e0e0e0;
+        }
+
+        .instruction-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .gesture-key {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 11px;
+            margin-right: 10px;
+            min-width: 65px;
+            text-align: center;
+            text-transform: uppercase;
+        }
+
+        .key-draw { color: #00ffcc; border-color: rgba(0, 255, 204, 0.4); }
+        .key-erase { color: #ff0055; border-color: rgba(255, 0, 85, 0.4); }
+        .key-pause { color: #ffcc00; border-color: rgba(255, 204, 0, 0.4); }
+
         /* Made by Vihaan DK Watermark/Credit styling */
         #credit-badge {
             position: absolute;
@@ -173,10 +227,26 @@
 
     <div id="app-container">
         <div id="loading">Initializing Camera & AI Tracking...</div>
+        
+        <div id="instructions-overlay">
+            <h3>Gesture Guide</h3>
+            <div class="instruction-item">
+                <span class="gesture-key key-draw">Draw</span>
+                <span>Raise Index Finger only</span>
+            </div>
+            <div class="instruction-item">
+                <span class="gesture-key key-erase">Erase</span>
+                <span>Open your entire hand</span>
+            </div>
+            <div class="instruction-item">
+                <span class="gesture-key key-pause">Pause</span>
+                <span>Make a tight closed fist</span>
+            </div>
+        </div>
+
         <video id="webcam" autoplay playsinline></video>
         <canvas id="paintCanvas"></canvas>
         
-        <!-- Attribution Badge -->
         <div id="credit-badge">Made by <span>Vihaan DK</span></div>
     </div>
 
@@ -186,6 +256,7 @@
         const ctx = canvasElement.getContext('2d');
         const statusIndicator = document.getElementById('status-indicator');
         const loadingScreen = document.getElementById('loading');
+        const instructionsOverlay = document.getElementById('instructions-overlay');
         
         // Controls
         const colorPicker = document.getElementById('colorPicker');
@@ -194,6 +265,7 @@
         // Track last known position for drawing lines
         let lastX = null;
         let lastY = null;
+        let setupCompleted = false;
 
         // Set explicit canvas internal dimensions
         function resizeCanvas() {
@@ -224,6 +296,14 @@
                 lastX = null;
                 lastY = null;
                 return;
+            }
+
+            // Fade out instructions overlay once user's hand is successfully detected first time
+            if (!setupCompleted) {
+                instructionsOverlay.style.opacity = '0';
+                instructionsOverlay.style.transform = 'translateY(-10px)';
+                setTimeout(() => instructionsOverlay.style.display = 'none', 600);
+                setupCompleted = true;
             }
 
             const landmarks = results.multiHandLandmarks[0];
