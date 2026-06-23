@@ -125,7 +125,7 @@
             transition: opacity 0.5s ease;
         }
 
-        /* Instructions HUD Overlay */
+        /* Instructions HUD Overlay (Always Visible) */
         #instructions-overlay {
             position: absolute;
             top: 20px;
@@ -139,7 +139,6 @@
             max-width: 280px;
             pointer-events: none;
             box-shadow: 0 4px 20px rgba(0,0,0,0.4);
-            transition: opacity 0.6s ease, transform 0.6s ease;
         }
 
         #instructions-overlay h3 {
@@ -196,7 +195,7 @@
             border: 1px solid rgba(255, 255, 255, 0.15);
             color: rgba(255, 255, 255, 0.9);
             box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-            pointer-events: none; /* Prevents it from getting in the way of gestures near edges */
+            pointer-events: none;
         }
 
         #credit-badge span {
@@ -256,7 +255,6 @@
         const ctx = canvasElement.getContext('2d');
         const statusIndicator = document.getElementById('status-indicator');
         const loadingScreen = document.getElementById('loading');
-        const instructionsOverlay = document.getElementById('instructions-overlay');
         
         // Controls
         const colorPicker = document.getElementById('colorPicker');
@@ -265,13 +263,11 @@
         // Track last known position for drawing lines
         let lastX = null;
         let lastY = null;
-        let setupCompleted = false;
 
         // Set explicit canvas internal dimensions
         function resizeCanvas() {
             canvasElement.width = 800;
             canvasElement.height = 600;
-            // Setup glowing properties once
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
         }
@@ -298,14 +294,6 @@
                 return;
             }
 
-            // Fade out instructions overlay once user's hand is successfully detected first time
-            if (!setupCompleted) {
-                instructionsOverlay.style.opacity = '0';
-                instructionsOverlay.style.transform = 'translateY(-10px)';
-                setTimeout(() => instructionsOverlay.style.display = 'none', 600);
-                setupCompleted = true;
-            }
-
             const landmarks = results.multiHandLandmarks[0];
 
             // Extract useful tracking landmarks
@@ -316,22 +304,19 @@
             const ringTip = landmarks[16];
             const pinkyTip = landmarks[20];
 
-            // Convert normalized coordinates (0.0 - 1.0) to canvas pixel coordinates
+            // Convert normalized coordinates to canvas pixel coordinates
             const currentX = indexTip.x * canvasElement.width;
             const currentY = indexTip.y * canvasElement.height;
 
             // --- GESTURE DETECTION LOGIC ---
             
-            // 1. Is index finger up?
             const isIndexUp = indexTip.y < indexPip.y;
             
-            // 2. Are other fingers up?
             const distMiddle = getDistance(middleTip, wrist);
             const distRing = getDistance(ringTip, wrist);
             const distPinky = getDistance(pinkyTip, wrist);
             const distIndex = getDistance(indexTip, wrist);
             
-            // Baseline dynamic threshold based on hand scale
             const handScale = getDistance(landmarks[5], wrist); 
             const openThreshold = handScale * 1.2; 
             const closeThreshold = handScale * 0.7;
@@ -348,7 +333,6 @@
 
             // --- ACTION EXECUTION ---
             
-            // Update Status UI
             statusIndicator.innerText = mode;
             statusIndicator.className = `status-${mode.toLowerCase()}`;
 
@@ -358,31 +342,26 @@
                     ctx.moveTo(lastX, lastY);
                     ctx.lineTo(currentX, currentY);
                     
-                    // Setup Neon Glow Style
                     const brushColor = colorPicker.value;
                     const brushSize = parseInt(brushSizeSlider.value);
                     
                     ctx.strokeStyle = brushColor;
                     ctx.lineWidth = brushSize;
                     ctx.shadowColor = brushColor;
-                    ctx.shadowBlur = brushSize * 1.5; // Neon bloom effect
+                    ctx.shadowBlur = brushSize * 1.5;
                     
                     ctx.stroke();
                 }
-                // Save current location as last position
                 lastX = currentX;
                 lastY = currentY;
 
             } else if (mode === "ERASE") {
-                // Erase via clear Rect in a radius around the index tip
-                const eraseSize = parseInt(brushSizeSlider.value) * 3; // Eraser is slightly larger
+                const eraseSize = parseInt(brushSizeSlider.value) * 3;
                 ctx.clearRect(currentX - eraseSize/2, currentY - eraseSize/2, eraseSize, eraseSize);
                 
-                // Reset coordinate memory so lines don't snap when you return to drawing
                 lastX = null;
                 lastY = null;
             } else {
-                // PAUSE or unhandled gesture: sever continuous line path
                 lastX = null;
                 lastY = null;
             }
